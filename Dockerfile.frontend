@@ -1,0 +1,16 @@
+FROM node:14
+
+WORKDIR /app
+
+COPY frontend/package*.json ./
+RUN npm install
+RUN npm install axios
+
+COPY frontend/ .
+
+ENV CI=true
+ENV WATCHPACK_POLLING=true
+
+EXPOSE 3000
+
+CMD ["npm", "start"]

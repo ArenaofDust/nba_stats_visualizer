@@ -1,0 +1,144 @@
+2a ---------
+
+WITH final_scores AS (
+    SELECT
+        CASE
+            WHEN home_score > away_score THEN home_id
+            ELSE away_id
+        END AS winner,
+        CASE
+            WHEN home_score < away_score THEN home_id
+            ELSE away_id
+        END AS loser,
+        home_id,
+        away_id
+    FROM game_schedule
+),
+team_record AS (
+    SELECT
+        team_id,
+        COUNT(*) AS games_played,
+        SUM(CASE WHEN team_id = winner THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN team_id = loser THEN 1 ELSE 0 END) AS losses
+    FROM (
+        SELECT home_id AS team_id, winning_team, losing_team FROM final_scores
+        UNION ALL
+        SELECT away_id AS team_id, winning_team, losing_team FROM final_scores
+    ) AS total_games
+    GROUP BY team_id
+),
+team_names AS (
+    SELECT
+        team_id,
+        team_name
+    FROM team
+)
+SELECT
+    tn.team_name,
+    tr.games_played,
+    tr.wins,
+    tr.losses,
+    CASE
+        WHEN tr.games_played > 0 THEN tr.wins::FLOAT / tr.games_played
+        ELSE 0
+    END AS win_percentage
+FROM
+    team_record tr
+JOIN
+    team_names tn
+ON
+    tr.team_id = tn.team_id
+ORDER BY
+    win_percentage DESC;
+
+
+2b ---------
+
+WITH final_scores AS (
+    SELECT
+        CASE
+            WHEN home_score > away_score THEN home_id
+            ELSE away_id
+        END AS winner,
+        CASE
+            WHEN home_score < away_score THEN home_id
+            ELSE away_id
+        END AS loser,
+        home_id,
+        away_id,
+        game_date
+    FROM game_schedule
+    WHERE DATE_TRUNC('month', game_date) = DATE_TRUNC('month', CURRENT_DATE) -- Filter for current month
+),
+team_record AS (
+    SELECT
+        team_id,
+        COUNT(*) AS games_played,
+        SUM(CASE WHEN team_id = winner THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN team_id = loser THEN 1 ELSE 0 END) AS losses
+    FROM (
+        SELECT home_id AS team_id, winner, loser FROM final_scores
+        UNION ALL
+        SELECT away_id AS team_id, winner, loser FROM final_scores
+    ) AS total_games
+    GROUP BY team_id
+),
+home_game_stats AS (
+    SELECT
+        home_id AS team_id,
+        COUNT(*) AS home_games_played
+    FROM game_schedule
+    WHERE DATE_TRUNC('month', game_date) = DATE_TRUNC('month', CURRENT_DATE) -- Filter for current month
+    GROUP BY home_id
+),
+away_game_stats AS (
+    SELECT
+        away_id AS team_id,
+        COUNT(*) AS away_games_played
+    FROM game_schedule
+    WHERE DATE_TRUNC('month', game_date) = DATE_TRUNC('month', CURRENT_DATE) -- Filter for current month
+    GROUP BY away_id
+),
+team_names AS (
+    SELECT
+        team_id,
+        team_name
+    FROM team
+),
+ranked_stats AS (
+    SELECT
+        tr.team_id,
+        tr.games_played,
+        tr.wins,
+        tr.losses,
+        COALESCE(hgs.home_games_played, 0) AS home_games_played,
+        COALESCE(ags.away_games_played, 0) AS away_games_played,
+        RANK() OVER (ORDER BY tr.games_played DESC) AS games_played_rank,
+        RANK() OVER (ORDER BY COALESCE(hgs.home_games_played, 0) DESC) AS home_games_played_rank,
+        RANK() OVER (ORDER BY COALESCE(ags.away_games_played, 0) DESC) AS away_games_played_rank
+    FROM team_record tr
+    LEFT JOIN home_game_stats hgs ON tr.team_id = hgs.team_id
+    LEFT JOIN away_game_stats ags ON tr.team_id = ags.team_id
+)
+SELECT
+    tn.team_name,
+    rs.games_played,
+    rs.games_played_rank,
+    rs.home_games_played,
+    rs.home_games_played_rank,
+    rs.away_games_played,
+    rs.away_games_played_rank,
+    rs.wins,
+    rs.losses,
+    CASE
+        WHEN rs.games_played > 0 THEN rs.wins::FLOAT / rs.games_played
+        ELSE 0
+    END AS win_percentage
+FROM
+    ranked_stats rs
+JOIN
+    team_names tn
+ON
+    rs.team_id = tn.team_id
+ORDER BY
+    win_percentage DESC;
